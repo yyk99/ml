@@ -278,59 +278,179 @@ housing = strat_train_set.drop("median_house_value", axis = 1)
 housing_labels = strat_train_set["median_house_value"].copy()
 
 
-# ### Data Cleaning
-# 
-# Most Machine Learning algorithms cannot work with missing features, so let’s create a few functions to take care of them. We saw earlier that the total_bedrooms attribute has some missing values, so let’s fix this. You have three options: 
-# - Get rid of the corresponding districts. 
-# - Get rid of the whole attribute. 
-# - Set the values to some value (zero, the mean, the median, etc.).
-# 
-# You can accomplish these easily using DataFrame’s dropna(), drop(), and fillna() methods:
-
 # In[29]:
 
 
-housing.dropna(subset = ["total_bedrooms"]) # option 1 
+# SimpleImputer. Here is how to use it. 
+# First, you need to create a SimpleImputer instance, 
+# specifying that you want to replace each attribute’s missing values with the median of that attribute: 
 
+from sklearn.impute import SimpleImputer 
+
+imputer = SimpleImputer( strategy = "median") 
+
+# Since the median can only be computed on numerical attributes, 
+# you need to create a copy of the data without the text attribute ocean_proximity: 
+
+housing_num = housing.drop("ocean_proximity", axis = 1) 
+
+# Now you can fit the imputer instance to the training data using the fit() method: 
+
+imputer.fit(housing_num)
+
+# Géron, Aurélien. Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow (pp. 63-64). O'Reilly Media. Kindle Edition. 
+
+
+# ## Handling Text and Categorical Attributes 
+# 
+# So far we have only dealt with numerical attributes, but now let’s look at text attributes. In this dataset, there is just one: the ocean_proximity attribute. Let’s look at its value for the first 10 instances:
+# 
+# Géron, Aurélien. Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow (pp. 65-66). O'Reilly Media. Kindle Edition.
 
 # In[30]:
 
 
-housing.drop("total_bedrooms", axis = 1) # option 2
+housing_cat = housing[["ocean_proximity"]]
 
 
 # In[31]:
 
 
-median = housing["total_bedrooms"].median() # option 3 
-housing["total_bedrooms"].fillna(median, inplace = True)
+housing_cat.head(10)
 
-
-# If you choose option 3, you should compute the median value on the training set and use it to fill the missing values in the training set. Don’t forget to save the median value that you have computed. You will need it later to replace missing values in the test set when you want to evaluate your system, and also once the system goes live to replace missing values in new data. Scikit-Learn provides a handy class to take care of missing values: *SimpleImputer*. 
-# 
-# Here is how to use it. First, you need to create a SimpleImputer instance, specifying that you want to replace each attribute’s missing values with the median of that attribute:
 
 # In[32]:
 
 
-from sklearn.impute import SimpleImputer 
-imputer = SimpleImputer(strategy = "median")
+from sklearn.preprocessing import OrdinalEncoder
+ordinal_encoder = OrdinalEncoder()
+housing_cat_encoded = ordinal_encoder.fit_transform(housing_cat)
+housing_cat_encoded[:10]
 
-
-# Since the median can only be computed on numerical attributes, you need to create a copy of the data without the text attribute ocean_proximity: 
 
 # In[33]:
 
 
-housing_num = housing.drop("ocean_proximity", axis = 1)
+# You can get the list of categories using the categories_ instance 
+# variable. It is a list containing a 1D array of categories for each 
+# categorical attribute (in this case, a list containing a single array 
+# since there is just one categorical attribute):
 
+ordinal_encoder.categories_
 
-#  Now you can fit the imputer instance to the training data using the fit() method:
 
 # In[34]:
 
 
-imputer.fit(housing_num)
+# one-hot attributes 
+from sklearn.preprocessing import OneHotEncoder
+cat_encoder = OneHotEncoder()
+housing_cat_1hot = cat_encoder.fit_transform( housing_cat)
+housing_cat_1hot
+
+
+# In[35]:
+
+
+# Notice that the output is a SciPy sparse matrix, instead of a NumPy array.
+# You can use it mostly like a normal 2D array, 21 but if you really want to convert it to a (dense) NumPy array, just call the toarray() method:
+
+housing_cat_1hot.toarray()
+
+
+# In[36]:
+
+
+type(housing_cat_1hot)
+
+
+# In[37]:
+
+
+cat_encoder.categories_
+
+
+# ## Custom Transformers
+# 
+# Géron, Aurélien. Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow (p. 68). O'Reilly Media. Kindle Edition. 
+
+# In[38]:
+
+
+from sklearn.base import BaseEstimator, TransformerMixin
+
+rooms_ix, bedrooms_ix, population_ix, households_ix = 3, 4, 5, 6 
+
+class CombinedAttributesAdder( BaseEstimator, TransformerMixin): 
+    def __init__( self, add_bedrooms_per_room = True): # no *args or ** kargs 
+        self.add_bedrooms_per_room = add_bedrooms_per_room 
+    def fit( self, X, y = None): 
+        return self # nothing else to do 
+    def transform( self, X): 
+        rooms_per_household = X[:, rooms_ix] / X[:, households_ix] 
+        population_per_household = X[:, population_ix] / X[:, households_ix] 
+        
+        if self.add_bedrooms_per_room: 
+            bedrooms_per_room = X[:, bedrooms_ix] / X[:, rooms_ix] 
+            return np.c_[ X, rooms_per_household, population_per_household, bedrooms_per_room] 
+        else: 
+            return np.c_[ X, rooms_per_household, population_per_household]
+        
+attr_adder = CombinedAttributesAdder( add_bedrooms_per_room = False) 
+housing_extra_attribs = attr_adder.transform( housing.values)
+
+
+# In[39]:
+
+
+attr_adder
+
+
+# In[40]:
+
+
+housing_extra_attribs
+
+
+# ## Transformation Pipelines
+# 
+# As you can see, there are many data transformation steps that need to be executed in the right order. Fortunately, Scikit-Learn provides the Pipeline class to help with such sequences of transformations. Here is a small pipeline for the numerical attributes:
+# 
+# Géron, Aurélien. Hands-On Machine Learning with Scikit-Learn, Keras, and TensorFlow (p. 70). O'Reilly Media. Kindle Edition. 
+
+# In[41]:
+
+
+from sklearn.pipeline import Pipeline 
+from sklearn.preprocessing import StandardScaler 
+
+num_pipeline = Pipeline([ ('imputer', SimpleImputer(strategy = "median")), 
+                         ('attribs_adder', CombinedAttributesAdder()), 
+                         ('std_scaler', StandardScaler()), ]) 
+
+housing_num_tr = num_pipeline.fit_transform(housing_num)
+
+
+# In[42]:
+
+
+#
+from sklearn.compose import ColumnTransformer 
+
+num_attribs = list( housing_num) 
+cat_attribs = ["ocean_proximity"] 
+full_pipeline = ColumnTransformer([
+    ("num", num_pipeline, num_attribs),
+    ("cat", OneHotEncoder(), cat_attribs), 
+    ])
+
+housing_prepared = full_pipeline.fit_transform( housing)
+
+
+# In[43]:
+
+
+housing_prepared
 
 
 # In[ ]:
